@@ -409,6 +409,56 @@ end
 -- Zustand
 ------------------------------------------------------------------------
 local db
+
+------------------------------------------------------------------------
+-- Debug-Log (landet in WTF\Account\<KONTO>\SavedVariables\BlessingBuddy.lua,
+-- geschrieben bei /reload oder Ausloggen). Aktivieren mit /bb log on
+------------------------------------------------------------------------
+local LOG_MAX = 400
+local function S(v)
+	local ok, str = pcall(tostring, v)
+	return ok and str or "<secret>"
+end
+local function Log(fmt, ...)
+	if not (db and db.debug) then return end
+	db.log = db.log or {}
+	local ok, line = pcall(string.format, fmt, ...)
+	if not ok then line = fmt .. " <format error>" end
+	table.insert(db.log, date("%H:%M:%S") .. " " .. line)
+	while #db.log > LOG_MAX do table.remove(db.log, 1) end
+end
+
+-- Rohdaten aller Buffs des Ziels über beide Abfragewege des Clients
+local function LogRawAuras()
+	if not (db and db.debug) then return end
+	if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+		local n = 0
+		for i = 1, 40 do
+			local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, "target", i, "HELPFUL")
+			if not ok then Log("  C_UnitAuras[%d] ERROR %s", i, S(a)) break end
+			if not a then break end
+			n = n + 1
+			Log("  C_UnitAuras[%d] name=%s id=%s src=%s fromPlayer=%s", i,
+				S(a.name), S(a.spellId), S(a.sourceUnit), S(a.isFromPlayerOrPlayerPet))
+		end
+		Log("  C_UnitAuras total=%d", n)
+	else
+		Log("  C_UnitAuras.GetAuraDataByIndex not available")
+	end
+	if UnitBuff then
+		local n = 0
+		for i = 1, 40 do
+			local ok, name, _, _, _, _, _, src, _, _, sid = pcall(UnitBuff, "target", i)
+			if not ok then Log("  UnitBuff[%d] ERROR %s", i, S(name)) break end
+			if not name then break end
+			n = n + 1
+			Log("  UnitBuff[%d] name=%s id=%s src=%s", i, S(name), S(sid), S(src))
+		end
+		Log("  UnitBuff total=%d", n)
+	else
+		Log("  UnitBuff not available")
+	end
+end
 local forceShow = false     -- /segen move: Leiste dauerhaft zeigen zum Verschieben
 local pendingSecure = false -- Änderungen, die bis Kampfende warten müssen
 
@@ -777,6 +827,15 @@ local function UpdateSecure()
 
 	SetVisible(ShouldShow())
 	UpdateVisuals()
+
+	if db and db.debug then
+		local parts = {}
+		for _, key in ipairs(ORDER) do
+			parts[#parts + 1] = key .. "=" .. S(small[key]:IsShown() and small[key].spellID or "-")
+		end
+		Log("state: best=%s(%s) tLevel=%s buttons: %s", S(bestKey), S(best.spellID),
+			S(tLevel), table.concat(parts, " "))
+	end
 end
 
 -- Fingerabdruck der Buffs am Ziel: erkennt Änderungen auch dann, wenn der
@@ -834,9 +893,29 @@ for _, e in ipairs({
 	"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_TARGET_CHANGED", "PLAYER_REGEN_ENABLED",
 	"UNIT_AURA", "GROUP_ROSTER_UPDATE", "SPELLS_CHANGED", "UNIT_FLAGS",
 	"UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_HEALTH_FREQUENT",
+	"UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_FAILED",
+	"UNIT_SPELLCAST_FAILED_QUIET", "UI_ERROR_MESSAGE",
 }) do SafeRegister(e) end
 
-ev:SetScript("OnEvent", function(_, event, arg1)
+ev:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
+	if event:find("^UNIT_SPELLCAST") then
+		if arg1 == "player" and db and db.debug then
+			-- SENT: unit, targetName, castGUID, spellID; sonst: unit, castGUID, spellID
+			local spellID = (event == "UNIT_SPELLCAST_SENT") and arg4 or arg3
+			Log("cast %s spell=%s(%s) target=%s", event:gsub("UNIT_SPELLCAST_", ""),
+				S(SpellInfo(spellID or 0)), S(spellID), S(event == "UNIT_SPELLCAST_SENT" and arg2 or UnitName("target")))
+		end
+		return
+	elseif event == "UI_ERROR_MESSAGE" then
+		Log("error: %s (%s)", S(arg2), S(arg1))
+		return
+	elseif event == "PLAYER_TARGET_CHANGED" and db and db.debug and UnitExists("target") then
+		local _, class = UnitClass("target")
+		Log("--- target %s class=%s level=%s player=%s friend=%s inGroup=%s myLevel=%s",
+			S(UnitName("target")), S(class), S(UnitLevel("target")), S(UnitIsPlayer("target")),
+			S(UnitIsFriend("player", "target")), S(InMyGroup("target")), S(UnitLevel("player")))
+		LogRawAuras()
+	end
 	if event == "ADDON_LOADED" then
 		if arg1 == ADDON then
 			BlessingBuddyDB = BlessingBuddyDB or {}
@@ -888,6 +967,16 @@ SlashCmdList.BLESSINGBUDDY = function(msg)
 		forceShow = not forceShow
 		print(PREFIX .. (forceShow and L.MOVE_ON or L.MOVE_OFF))
 		UpdateSecure()
+	elseif msg == "log on" or msg == "log off" or msg == "log clear" then
+		if not db then return end
+		if msg == "log clear" then
+			db.log = {}
+			print(PREFIX .. "log cleared")
+		else
+			db.debug = (msg == "log on")
+			print(PREFIX .. "log " .. (db.debug and "ON – /reload writes it to SavedVariables\\BlessingBuddy.lua" or "OFF"))
+			if db.debug then Log("=== log started, version %s, client %s", S((C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata)(ADDON, "Version")), S((GetBuildInfo()))) end
+		end
 	elseif msg == "debug" then
 		local function v(f, ...)
 			local ok, r = pcall(f, ...)

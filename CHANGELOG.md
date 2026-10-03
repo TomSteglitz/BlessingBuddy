@@ -6,6 +6,7 @@
 - Fixed: buffs now respect the target-level limit – the highest rank that works on the target is cast, and buffs with no usable rank are hidden (e.g. Kings on targets below level 10)
 - `/bb` help now shows the addon version
 - `/bb debug` now lists the target's buffs (yours marked with *)
+- New: `/bb log on|off|clear` writes a detailed debug log (target, raw buff data, casts, error messages) to the SavedVariables file – helpful for bug reports
 
 ## 1.2.6 (2026-10-03)
 - Fixed: buffs and heals now always cast your highest learned rank (WoW: Forever doesn't pick it automatically when casting by name)
