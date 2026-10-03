@@ -296,6 +296,72 @@ local function HighestRank(id)
 	return (name and rankMap[name]) or id
 end
 
+-- Ränge der Buffs mit Lernstufe (Classic-Werte). Buffs unterliegen einer
+-- Stufengrenze: Ein Rang wirkt nur, wenn das Ziel höchstens 10 Stufen unter
+-- seiner Lernstufe liegt. Heilzauber haben diese Grenze nicht.
+local BUFF_RANKS = {
+	[20217] = { {20217, 20} },                                                           -- Könige
+	[19740] = { {19740, 4}, {19834, 12}, {19835, 22}, {19836, 32}, {19837, 42}, {19838, 52}, {25291, 60} }, -- Macht
+	[19742] = { {19742, 14}, {19850, 24}, {19852, 34}, {19853, 44}, {19854, 54}, {25290, 60} },             -- Weisheit
+	[19977] = { {19977, 40}, {19978, 50}, {19979, 60} },                                   -- Licht
+	[20911] = { {20911, 30}, {20912, 40}, {20913, 50}, {20914, 60} },                      -- Refugium
+	[1038]  = { {1038, 26} },                                                              -- Rettung
+	[1126]  = { {1126, 1}, {5232, 10}, {6756, 20}, {5234, 30}, {8907, 40}, {9884, 50}, {9885, 60} }, -- Mal
+	[467]   = { {467, 6}, {782, 14}, {1075, 24}, {8914, 34}, {9756, 44}, {9910, 54} },     -- Dornen
+	[1243]  = { {1243, 1}, {1244, 12}, {1245, 24}, {2791, 36}, {10937, 48}, {10938, 60} }, -- Seelenstärke
+	[14752] = { {14752, 30}, {14818, 40}, {14819, 50}, {27841, 60} },                      -- Göttlicher Willen
+	[976]   = { {976, 30}, {10957, 42}, {10958, 56} },                                     -- Schattenschutz
+	[6346]  = { {6346, 20} },                                                              -- Furchtschutz
+	[1459]  = { {1459, 1}, {1460, 14}, {1461, 28}, {10156, 42}, {10157, 56} },             -- Arkane Intelligenz
+	[1008]  = { {1008, 18}, {8455, 30}, {10169, 42}, {10170, 54} },                        -- Magie verstärken
+	[604]   = { {604, 12}, {8450, 24}, {8451, 36}, {10173, 48}, {10174, 60} },             -- Magie dämpfen
+	[5697]  = { {5697, 16} },                                                              -- Unendlicher Atem
+	[132]   = { {132, 26} },                                                               -- Unsichtbarkeit entdecken
+	[131]   = { {131, 22} },                                                               -- Wasseratmung
+	[546]   = { {546, 28} },                                                               -- Wasserwandeln
+}
+
+-- Lernstufe eines Rangs: bevorzugt vom Client, sonst aus der Tabelle
+local function LearnLevel(id, fallback)
+	local ok, lvl = pcall(function()
+		if C_Spell and C_Spell.GetSpellLevelLearned then return C_Spell.GetSpellLevelLearned(id) end
+		if GetSpellLevelLearned then return GetSpellLevelLearned(id) end
+	end)
+	if ok and type(lvl) == "number" and lvl > 0 then return lvl end
+	return fallback
+end
+
+-- Höchster bekannter Buff-Rang, der auf ein Ziel dieser Stufe wirkt.
+-- Liefert nil, wenn kein Rang passt (z. B. Könige auf Stufe 8).
+local function BuffRankFor(baseID, targetLevel)
+	if not Known(baseID) then return nil end
+	local limit = (targetLevel and targetLevel > 0) and (targetLevel + 10) or math.huge
+	local ranks = BUFF_RANKS[baseID] or {}
+	local tableLevel = {}
+	for _, r in ipairs(ranks) do tableLevel[r[1]] = r[2] end
+
+	-- 1. Höchster Rang laut Zauberbuch (deckt auch abweichende Forever-IDs ab)
+	local top = HighestRank(baseID)
+	local topLevel = LearnLevel(top, tableLevel[top])
+	if not topLevel or topLevel <= limit then return top end
+
+	-- 2. Zu stark für das Ziel: höchsten passenden Rang aus der Tabelle nehmen
+	local pick
+	for _, r in ipairs(ranks) do
+		local id = r[1]
+		local lvl = LearnLevel(id, r[2])
+		if lvl <= limit and (id == baseID or Known(id)) then pick = id end
+	end
+	return pick
+end
+
+local function TargetLevel()
+	if not UnitExists("target") then return nil end
+	local lvl = UnitLevel("target")
+	if type(lvl) == "number" and lvl > 0 then return lvl end
+	return nil -- unbekannt (??): keine Begrenzung
+end
+
 -- Liefert: alle Buffs auf dem Ziel (Name -> true) und die von dir gewirkten
 local function TargetBuffs()
 	local all, mine = {}, {}
@@ -510,14 +576,13 @@ local function PickBest(all, mine)
 
 	if CFG.exclusive then
 		for _, key in ipairs(ORDER) do
-			if HasKey(mine, key) and Known(BLESSINGS[key]) then return key end
+			if HasKey(mine, key) and BuffRankFor(BLESSINGS[key], TargetLevel()) then return key end
 		end
 	end
 
 	local fallback
 	for _, key in ipairs(prio) do
-		local id = BLESSINGS[key]
-		if Known(id) then
+		if BuffRankFor(BLESSINGS[key], TargetLevel()) then
 			fallback = fallback or key
 			if not HasKey(all, key) then return key end
 		end
@@ -613,8 +678,8 @@ local function UpdateVisuals()
 	UpdateHealth()
 end
 
-local function AssignButton(b, id)
-	local castID = HighestRank(id)
+local function AssignButton(b, id, exact)
+	local castID = exact and id or HighestRank(id)
 	local name, icon = SpellInfo(castID)
 	b.spellID, b.spellName = castID, name
 	b:SetAttribute("spell", castID) -- gezielt der höchste gelernte Rang
@@ -640,11 +705,13 @@ local function UpdateSecure()
 	local nBuff = 0
 	-- Begleiter: die meisten Buffs wirken in Forever nicht -> nur petOK-Buffs zeigen
 	local petTarget = UnitExists("target") and not UnitIsPlayer("target")
+	local tLevel = TargetLevel()
 	for _, key in ipairs(ORDER) do
-		local b, id = small[key], BLESSINGS[key]
+		local b = small[key]
 		local allowed = not petTarget or (CFG.petOK and CFG.petOK[key])
-		if allowed and SpellInfo(id) and Known(id) then
-			AssignButton(b, id)
+		local castID = allowed and BuffRankFor(BLESSINGS[key], tLevel)
+		if castID and SpellInfo(castID) then
+			AssignButton(b, castID, true)
 			b:ClearAllPoints()
 			b:SetPoint("TOPLEFT", frame, "TOPLEFT", x0 + nBuff * (SMALL + GAP), ySmall)
 			b:Show()
@@ -657,7 +724,7 @@ local function UpdateSecure()
 
 	best.key = bestKey
 	if bestKey then
-		AssignButton(best, BLESSINGS[bestKey])
+		AssignButton(best, BuffRankFor(BLESSINGS[bestKey], tLevel) or BLESSINGS[bestKey], true)
 		best:ClearAllPoints()
 		best:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -TITLE_H)
 		best:Show()
