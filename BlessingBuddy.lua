@@ -147,6 +147,22 @@ local ORDER = CFG.order
 local PRIORITY = CFG.priority
 local DEFAULT_PRIORITY = CFG.default
 local HEALS = CFG.heals or {}
+
+-- Gleichwertige Buffs: Gruppen- bzw. "Große" Fassungen stapeln nicht mit der
+-- Einzelfassung. Liegt eine davon auf dem Ziel, gilt der Buff als vorhanden.
+local EQUIV = {
+	KINGS     = { 25898 }, -- Großer Segen der Könige
+	MIGHT     = { 25782 }, -- Großer Segen der Macht
+	WISDOM    = { 25894 }, -- Großer Segen der Weisheit
+	LIGHT     = { 25890 }, -- Großer Segen des Lichts
+	SANCTUARY = { 25899 }, -- Großer Segen des Refugiums
+	SALVATION = { 25895 }, -- Großer Segen der Rettung
+	MARK      = { 21849 }, -- Gabe der Wildnis
+	FORT      = { 21562 }, -- Gebet der Seelenstärke
+	SPIRIT    = { 27681 }, -- Gebet der Willenskraft
+	SHADOW    = { 27683 }, -- Gebet des Schattenschutzes
+	INTELLECT = { 23028 }, -- Arkane Brillanz
+}
 local MAX_HEALS = 6
 
 ------------------------------------------------------------------------
@@ -298,6 +314,29 @@ local function TargetBuffs()
 		if source and UnitIsUnit(source, "player") then mine[name] = true end
 	end
 	return all, mine
+end
+
+-- Namen (lokalisiert), unter denen ein Buff-Schlüssel auf dem Ziel liegen kann
+local equivNames = {}
+local function NamesFor(key)
+	if equivNames[key] then return equivNames[key] end
+	local list = {}
+	local main = SpellInfo(BLESSINGS[key])
+	if main then list[#list + 1] = main end
+	for _, id in ipairs(EQUIV[key] or {}) do
+		local n = SpellInfo(id)
+		if n then list[#list + 1] = n end
+	end
+	if #list > 0 then equivNames[key] = list end -- erst cachen, wenn Zauberdaten geladen sind
+	return list
+end
+
+local function HasKey(set, key)
+	if not key then return false end
+	for _, n in ipairs(NamesFor(key)) do
+		if set[n] then return true end
+	end
+	return false
 end
 
 ------------------------------------------------------------------------
@@ -471,8 +510,7 @@ local function PickBest(all, mine)
 
 	if CFG.exclusive then
 		for _, key in ipairs(ORDER) do
-			local name = SpellInfo(BLESSINGS[key])
-			if name and mine[name] and Known(BLESSINGS[key]) then return key end
+			if HasKey(mine, key) and Known(BLESSINGS[key]) then return key end
 		end
 	end
 
@@ -480,9 +518,8 @@ local function PickBest(all, mine)
 	for _, key in ipairs(prio) do
 		local id = BLESSINGS[key]
 		if Known(id) then
-			local name = SpellInfo(id)
 			fallback = fallback or key
-			if name and not all[name] then return key end
+			if not HasKey(all, key) then return key end
 		end
 	end
 	return fallback
@@ -552,9 +589,9 @@ local function UpdateVisuals()
 	local all = TargetBuffs()
 	for _, key in ipairs(ORDER) do
 		local b = small[key]
-		b.active:SetShown(b.spellName ~= nil and all[b.spellName] == true)
+		b.active:SetShown(b.spellName ~= nil and HasKey(all, key))
 	end
-	best.active:SetShown(best.spellName ~= nil and all[best.spellName] == true)
+	best.active:SetShown(best.spellName ~= nil and HasKey(all, best.key))
 	for i = 1, MAX_HEALS do
 		local b = heal[i]
 		b.active:SetShown(b.spellName ~= nil and all[b.spellName] == true) -- z. B. Erneuerung/Verjüngung
@@ -618,6 +655,7 @@ local function UpdateSecure()
 		end
 	end
 
+	best.key = bestKey
 	if bestKey then
 		AssignButton(best, BLESSINGS[bestKey])
 		best:ClearAllPoints()
@@ -790,6 +828,11 @@ SlashCmdList.BLESSINGBUDDY = function(msg)
 			return tostring(r)
 		end
 		print(PREFIX .. "debug (target):")
+		local allB, mineB = TargetBuffs()
+		local names = {}
+		for n in pairs(allB) do names[#names + 1] = (mineB[n] and (n .. "*") or n) end
+		table.sort(names)
+		print("  buffs (*=yours): " .. (#names > 0 and table.concat(names, ", ") or "-"))
 		print("  exists=" .. v(UnitExists, "target")
 			.. " player=" .. v(UnitIsPlayer, "target")
 			.. " controlled=" .. v(UnitPlayerControlled, "target")
@@ -814,7 +857,9 @@ SlashCmdList.BLESSINGBUDDY = function(msg)
 		RestorePosition()
 		print(PREFIX .. L.RESET)
 	else
-		print("|cff66ccffBlessingBuddy|r " .. L.CMDS)
+		local getMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+		local version = getMeta and getMeta(ADDON, "Version") or "?"
+		print("|cff66ccffBlessingBuddy|r " .. version .. " - " .. L.CMDS)
 		print(L.HELP_MOVE)
 		print(L.HELP_RST)
 		print(L.HELP_KEY)
