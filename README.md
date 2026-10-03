@@ -9,6 +9,7 @@ Target a friendly stranger and BlessingBuddy shows a small bar with your single-
 <p align="center">
   <img src="media/screenshot-paladin-next-blessing.png" alt="Kings already active, Might recommended next">
   <img src="media/screenshot-priest.png" alt="Priest bar">
+  <img src="media/screenshot-out-of-range.png" alt="Icons turn red when the target is out of range">
 </p>
 
 ## Download

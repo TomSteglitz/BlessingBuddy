@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp /root/.claude/uploads/e0010cbb-1129-5cb1-ba39-be9e4fdb8abf/c996b040-image.png media/screenshot-out-of-range.png)",
+      "Bash(cp media/screenshot-out-of-range.png /mnt/user-data/outputs/curseforge/6-out-of-range.png)",
+      "Bash(python3 -)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m 'Add out-of-range screenshot *)"
+    ]
+  }
+}
