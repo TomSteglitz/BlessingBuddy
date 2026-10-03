@@ -4,6 +4,7 @@
 - Paladin: removed Blessing of Protection from the rescue row – it can only be cast on party/raid members
 - Fixed: Greater Blessings and group buffs (Gift of the Wild, Prayer of Fortitude, Arcane Brilliance, …) now count as the matching single buff – the recommendation moves on instead of suggesting a buff that wouldn't stack
 - Fixed: buffs now respect the target-level limit – the highest rank that works on the target is cast, and buffs with no usable rank are hidden (e.g. Kings on targets below level 10)
+- Paladin: when your own blessing is already on the target, the big button is greyed out ("done") while it has more than 5 minutes left, and turns into a yellow-framed refresh button with a countdown below 5 minutes (Forever blessings last 60 minutes)
 - `/bb` help now shows the addon version
 - `/bb debug` now lists the target's buffs (yours marked with *)
 - New: `/bb log on|off|clear` writes a detailed debug log (target, raw buff data, casts, error messages) to the SavedVariables file – helpful for bug reports

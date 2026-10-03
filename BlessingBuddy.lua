@@ -364,23 +364,33 @@ end
 
 -- Liefert: alle Buffs auf dem Ziel (Name -> true) und die von dir gewirkten
 local function TargetBuffs()
-	local all, mine = {}, {}
-	if not UnitExists("target") then return all, mine end
+	local all, mine, mineExp = {}, {}, {}
+	if not UnitExists("target") then return all, mine, mineExp end
 	for i = 1, 40 do
-		local name, source
+		local name, source, expires
 		if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
 			local a = C_UnitAuras.GetAuraDataByIndex("target", i, "HELPFUL")
-			if a then name, source = a.name, a.sourceUnit end
+			if a then name, source, expires = a.name, a.sourceUnit, a.expirationTime end
 		else
-			local n, _, _, _, _, _, s = UnitBuff("target", i)
-			name, source = n, s
+			local n, _, _, _, _, e, s = UnitBuff("target", i)
+			name, source, expires = n, s, e
 		end
 		if not name then break end
 		all[name] = true
-		if source and UnitIsUnit(source, "player") then mine[name] = true end
+		if source and UnitIsUnit(source, "player") then
+			mine[name] = true
+			if type(expires) == "number" and expires > 0 then mineExp[name] = expires end
+		end
 	end
-	return all, mine
+	return all, mine, mineExp
 end
+
+-- Eigene Segen: Zeitpunkt des letzten Wirkens pro Ziel (Fallback, falls der
+-- Client die Restzeit fremder Spieler nicht liefert). Forever: 60 Minuten.
+local BUFF_DURATION = 3600
+local REFRESH_BELOW = 300 -- ab 5 Minuten Restzeit wird Auffrischen empfohlen
+local myCasts = {}        -- [Zielname][Zaubername] = GetTime()
+local pendingCasts = {}   -- [castGUID] = Zielname
 
 -- Namen (lokalisiert), unter denen ein Buff-Schlüssel auf dem Ziel liegen kann
 local equivNames = {}
@@ -403,6 +413,22 @@ local function HasKey(set, key)
 		if set[n] then return true end
 	end
 	return false
+end
+
+-- Restzeit (Sekunden) deines eigenen Buffs dieses Schlüssels auf dem Ziel,
+-- nil wenn nicht von dir oder unbekannt
+local function MyRemaining(key, mine, mineExp)
+	if not key then return nil end
+	local tname = UnitName("target")
+	for _, n in ipairs(NamesFor(key)) do
+		if mine[n] then
+			if mineExp[n] then return mineExp[n] - GetTime() end
+			local t = tname and myCasts[tname] and myCasts[tname][n]
+			if t then return BUFF_DURATION - (GetTime() - t) end
+			return nil
+		end
+	end
+	return nil
 end
 
 ------------------------------------------------------------------------
@@ -438,8 +464,9 @@ local function LogRawAuras()
 			if not ok then Log("  C_UnitAuras[%d] ERROR %s", i, S(a)) break end
 			if not a then break end
 			n = n + 1
-			Log("  C_UnitAuras[%d] name=%s id=%s src=%s fromPlayer=%s", i,
-				S(a.name), S(a.spellId), S(a.sourceUnit), S(a.isFromPlayerOrPlayerPet))
+			Log("  C_UnitAuras[%d] name=%s id=%s src=%s fromPlayer=%s dur=%s left=%s", i,
+				S(a.name), S(a.spellId), S(a.sourceUnit), S(a.isFromPlayerOrPlayerPet), S(a.duration),
+				S(type(a.expirationTime) == "number" and a.expirationTime > 0 and math.floor(a.expirationTime - GetTime()) or a.expirationTime))
 		end
 		Log("  C_UnitAuras total=%d", n)
 	else
@@ -561,6 +588,40 @@ local function CreateSpellButton(name, size)
 end
 
 local best = CreateSpellButton("BlessingBuddyBestButton", BEST)
+best.border = best:CreateTexture(nil, "OVERLAY")
+best.border:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+best.border:SetBlendMode("ADD")
+best.border:SetVertexColor(1, 0.82, 0)
+best.border:SetPoint("CENTER")
+best.border:SetSize(BEST * 1.8, BEST * 1.8)
+best.border:Hide()
+best.timer = best:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+best.timer:SetPoint("BOTTOM", 0, 2)
+best.timer:SetTextColor(1, 0.82, 0)
+best.timer:Hide()
+
+-- Zustand des großen Buttons: normal / erledigt (ausgegraut) / auffrischen (gelb)
+local function UpdateBestState()
+	if not best:IsShown() or not best.key then
+		best.icon:SetDesaturated(false); best.border:Hide(); best.timer:Hide()
+		return
+	end
+	local _, mine, mineExp = TargetBuffs()
+	if not HasKey(mine, best.key) then
+		best.icon:SetDesaturated(false); best.border:Hide(); best.timer:Hide()
+		return
+	end
+	local rem = MyRemaining(best.key, mine, mineExp)
+	if rem and rem <= REFRESH_BELOW then
+		best.icon:SetDesaturated(false)
+		best.border:Show()
+		best.timer:SetText(string.format("%d:%02d", math.max(0, math.floor(rem / 60)), math.max(0, math.floor(rem % 60))))
+		best.timer:Show()
+	else
+		best.icon:SetDesaturated(true) -- erledigt: dein Segen ist noch frisch
+		best.border:Hide(); best.timer:Hide()
+	end
+end
 
 local small = {}
 for _, key in ipairs(ORDER) do
@@ -707,6 +768,7 @@ local function UpdateVisuals()
 		b.active:SetShown(b.spellName ~= nil and HasKey(all, key))
 	end
 	best.active:SetShown(best.spellName ~= nil and HasKey(all, best.key))
+	UpdateBestState()
 	for i = 1, MAX_HEALS do
 		local b = heal[i]
 		b.active:SetShown(b.spellName ~= nil and all[b.spellName] == true) -- z. B. Erneuerung/Verjüngung
@@ -864,6 +926,7 @@ frame:SetScript("OnUpdate", function(_, elapsed)
 	end
 	if acc < 0.2 then return end
 	acc = 0
+	if best.timer:IsShown() or best.icon:IsDesaturated() then UpdateBestState() end
 	local hasTarget = UnitExists("target")
 	for _, b in ipairs(allButtons) do
 		if b:IsShown() and b.spellName then
@@ -899,6 +962,22 @@ for _, e in ipairs({
 
 ev:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
 	if event:find("^UNIT_SPELLCAST") then
+		if arg1 == "player" then
+			if event == "UNIT_SPELLCAST_SENT" and arg3 then
+				pendingCasts[arg3] = arg2
+			elseif event == "UNIT_SPELLCAST_SUCCEEDED" and arg2 and pendingCasts[arg2] then
+				local tname = pendingCasts[arg2]
+				pendingCasts[arg2] = nil
+				local sname = SpellInfo(arg3 or 0)
+				if tname and sname then
+					-- Forever meldet hier "Vorname Nachname"; UnitName liefert nur den
+					-- Vornamen -> nur das erste Wort (ohne Realm) als Schlüssel
+					tname = tname:match("^[^%s%-]+") or tname
+					myCasts[tname] = myCasts[tname] or {}
+					myCasts[tname][sname] = GetTime()
+				end
+			end
+		end
 		if arg1 == "player" and db and db.debug then
 			-- SENT: unit, targetName, castGUID, spellID; sonst: unit, castGUID, spellID
 			local spellID = (event == "UNIT_SPELLCAST_SENT") and arg4 or arg3
