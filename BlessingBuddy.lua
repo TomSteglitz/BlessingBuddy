@@ -45,7 +45,7 @@ local CLASS_DATA = {
 			{ 19750 },       -- Lichtblitz
 			{ 635 },         -- Heiliges Licht
 			{ 633 },         -- Handauflegung
-			{ 1022 },        -- Segen des Schutzes
+			-- Segen des Schutzes (1022) bewusst nicht dabei: nur auf Gruppen-/Raidmitglieder wirkbar
 			{ 1044 },        -- Segen der Freiheit
 			{ 4987, 1152 },  -- Reinigung des Glaubens / Läutern
 		},

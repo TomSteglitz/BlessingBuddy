@@ -1,5 +1,8 @@
 # BlessingBuddy Changelog
 
+## 1.2.7 (unreleased)
+- Paladin: removed Blessing of Protection from the rescue row – it can only be cast on party/raid members
+
 ## 1.2.6 (2026-10-03)
 - Fixed: buffs and heals now always cast your highest learned rank (WoW: Forever doesn't pick it automatically when casting by name)
 - Fixed: recommendation now also updates when the client doesn't send aura events for players outside your group (checks the target's buffs twice per second)
