@@ -1,0 +1,10 @@
+<Bindings>
+	<Binding name="CLICK BlessingBuddyBestButton:LeftButton" header="BLESSINGBUDDY" category="ADDONS">
+	</Binding>
+	<Binding name="CLICK BlessingBuddyHeal1Button:LeftButton" category="ADDONS">
+	</Binding>
+	<Binding name="CLICK BlessingBuddyHeal2Button:LeftButton" category="ADDONS">
+	</Binding>
+	<Binding name="CLICK BlessingBuddyHeal3Button:LeftButton" category="ADDONS">
+	</Binding>
+</Bindings>
