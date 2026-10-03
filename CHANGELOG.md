@@ -1,6 +1,6 @@
 # BlessingBuddy Changelog
 
-## 1.2.7 (unreleased)
+## 1.2.7 (2026-10-03)
 - Paladin: removed Blessing of Protection from the rescue row – it can only be cast on party/raid members
 - Fixed: Greater Blessings and group buffs (Gift of the Wild, Prayer of Fortitude, Arcane Brilliance, …) now count as the matching single buff – the recommendation moves on instead of suggesting a buff that wouldn't stack
 - `/bb` help now shows the addon version
