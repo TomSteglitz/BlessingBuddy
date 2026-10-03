@@ -7,8 +7,8 @@ One-click buffs and rescue heals for players and pets **outside your group** in 
 Target a friendly stranger and BlessingBuddy shows a small bar with your single-target buffs, a recommended buff for the target's class, the target's health and a row of rescue heals.
 
 <p align="center">
-  <img src="media/screenshot-paladin.png" alt="Paladin bar with full rescue row">
   <img src="media/screenshot-paladin-next-blessing.png" alt="Kings already active, Might recommended next">
+  <img src="media/screenshot-priest.png" alt="Priest bar">
 </p>
 
 ## Download
