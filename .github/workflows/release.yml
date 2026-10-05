@@ -23,3 +23,6 @@ jobs:
 
       - name: Package and upload
         uses: BigWigsMods/packager@v2
+        with:
+          # Dateiname : Anzeigename auf CurseForge, z. B. "BlessingBuddy v1.5.01"
+          args: -n "{package-name}-{project-version}:{package-name} {project-version}"
