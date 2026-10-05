@@ -11,6 +11,7 @@ Target a friendly stranger and BlessingBuddy shows a small bar with your single-
   <img src="media/gallery-2-out-of-range.png" width="640" alt="Icons turn red when the target is out of range">
   <img src="media/gallery-3-every-class.png" width="640" alt="Works for every buffing class, here a level 2 priest">
   <img src="media/gallery-4-pvp-warning.png" width="640" alt="Red PvP warning when helping the target would flag you">
+  <img src="media/gallery-5-spellcasters.png" width="640" alt="A mage sees Arcane Intellect recommended for a priest">
 </p>
 
 ## Download
