@@ -230,10 +230,19 @@ local function InRange(name)
 	return nil
 end
 
+-- Forever: Werte können "secret" sein (z. B. während der globalen Abklingzeit)
+-- -> nie direkt vergleichen, sondern über SafeGreater prüfen
+local function SafeGreater(v, limit)
+	local ok, res = pcall(function() return type(v) == "number" and v > limit end)
+	if ok then return res end
+	return nil -- nicht vergleichbar (secret)
+end
+
+-- Liefert start, duration, isOnGCD (isOnGCD = nil, wenn der Client es nicht meldet)
 local function Cooldown(name)
 	if C_Spell and C_Spell.GetSpellCooldown then
 		local cd = C_Spell.GetSpellCooldown(name)
-		if cd then return cd.startTime, cd.duration end
+		if cd then return cd.startTime, cd.duration, cd.isOnGCD end
 		return 0, 0
 	end
 	if GetSpellCooldown then
@@ -362,10 +371,14 @@ local function TargetLevel()
 	return nil -- unbekannt (??): keine Begrenzung
 end
 
--- Liefert: alle Buffs auf dem Ziel (Name -> true) und die von dir gewirkten
-local function TargetBuffs()
+-- Liefert: alle Buffs auf dem Ziel (Name -> true) und die von dir gewirkten.
+-- Forever: Im Kampf sind die Buff-Daten fremder Ziele "secret" – die API wirft
+-- dann einen Fehler. In dem Fall gilt der letzte lesbare Stand dieses Ziels
+-- (wird beim Zielwechsel verworfen). 4. Rückgabewert: false = Daten veraltet.
+local auraCache -- { all, mine, mineExp } des aktuellen Ziels
+
+local function ReadTargetBuffs()
 	local all, mine, mineExp = {}, {}, {}
-	if not UnitExists("target") then return all, mine, mineExp end
 	for i = 1, 40 do
 		local name, source, expires
 		if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
@@ -379,10 +392,21 @@ local function TargetBuffs()
 		all[name] = true
 		if source and UnitIsUnit(source, "player") then
 			mine[name] = true
-			if type(expires) == "number" and expires > 0 then mineExp[name] = expires end
+			if SafeGreater(expires, 0) then mineExp[name] = expires end
 		end
 	end
 	return all, mine, mineExp
+end
+
+local function TargetBuffs()
+	if not UnitExists("target") then return {}, {}, {}, true end
+	local ok, all, mine, mineExp = pcall(ReadTargetBuffs)
+	if ok then
+		auraCache = { all, mine, mineExp }
+		return all, mine, mineExp, true
+	end
+	if auraCache then return auraCache[1], auraCache[2], auraCache[3], false end
+	return {}, {}, {}, false
 end
 
 -- Eigene Segen: Zeitpunkt des letzten Wirkens pro Ziel (Fallback, falls der
@@ -466,7 +490,7 @@ local function LogRawAuras()
 			n = n + 1
 			Log("  C_UnitAuras[%d] name=%s id=%s src=%s fromPlayer=%s dur=%s left=%s", i,
 				S(a.name), S(a.spellId), S(a.sourceUnit), S(a.isFromPlayerOrPlayerPet), S(a.duration),
-				S(type(a.expirationTime) == "number" and a.expirationTime > 0 and math.floor(a.expirationTime - GetTime()) or a.expirationTime))
+				S(SafeGreater(a.expirationTime, 0) and math.floor(a.expirationTime - GetTime()) or a.expirationTime))
 		end
 		Log("  C_UnitAuras total=%d", n)
 	else
@@ -551,6 +575,40 @@ hp.bg:SetColorTexture(0.15, 0.15, 0.15, 0.8)
 hp:SetStatusBarColor(0.1, 0.85, 0.1)
 hp:Hide()
 
+-- Heil-Vorschau (wie Healium): Balken hängen an der rechten Kante der
+-- Lebensanzeige; der Clip-Rahmen schneidet alles über 100 % ab (= Überheilung).
+-- Forever: Lebenswerte fremder Spieler sind im Kampf "secret" -> nie in Lua
+-- rechnen, sondern die Werte direkt an die StatusBars geben.
+local predClip = CreateFrame("Frame", nil, hp)
+predClip:SetAllPoints(hp)
+predClip:SetClipsChildren(true)
+predClip:SetFrameLevel(hp:GetFrameLevel() + 1)
+
+local function CreatePredictBar(r, g, b, a)
+	local bar = CreateFrame("StatusBar", nil, predClip)
+	bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+	bar:SetStatusBarColor(r, g, b, a)
+	bar:SetMinMaxValues(0, 1)
+	bar:SetValue(0)
+	bar:SetHeight(HP_H)
+	bar:Hide()
+	return bar
+end
+-- eingehende Heilung (deine und fremde, während des Zauberns)
+local incBar = CreatePredictBar(0.0, 0.55, 0.3, 0.9)
+incBar:SetPoint("TOPLEFT", hp:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+-- Vorschau beim Drüberfahren über einen Heil-Button (schließt an die eingehende an)
+-- verbleibende Heilung laufender HoTs (Verjüngung, Nachwachsen, Erneuerung)
+local hotBar = CreatePredictBar(0.0, 0.75, 0.65, 0.85)
+hotBar:SetPoint("TOPLEFT", incBar:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+local previewBar = CreatePredictBar(0.6, 1.0, 0.6, 0.7)
+previewBar:SetPoint("TOPLEFT", hotBar:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+hp:SetScript("OnSizeChanged", function(self, w)
+	incBar:SetWidth(w); hotBar:SetWidth(w); previewBar:SetWidth(w)
+end)
+local previewSpellID -- Heil-Button, über dem die Maus gerade steht
+local UpdatePrediction -- wird weiter unten definiert
+
 local allButtons = {}
 
 local function CreateSpellButton(name, size)
@@ -578,7 +636,7 @@ local function CreateSpellButton(name, size)
 
 	b:SetScript("OnEnter", function(self)
 		if not self.spellID then return end
-		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetOwner(self, self.tooltipAnchor or "ANCHOR_TOP")
 		GameTooltip:SetSpellByID(self.spellID)
 		GameTooltip:Show()
 	end)
@@ -744,6 +802,225 @@ local function HealthColor()
 	end
 end
 
+-- Geschätzte Heilmenge eines Zaubers: Mittelwert aus dem Zaubertext
+-- ("heilt 42 bis 51") plus anteiliger Heilungsbonus (Classic-Faustregel:
+-- Zauberzeit / 3,5 Sek.). nil, wenn der Text keine Zahl liefert.
+local descCache = {}
+local function SpellBaseHeal(id)
+	if descCache[id] ~= nil then return descCache[id] or nil end
+	local getDesc = (C_Spell and C_Spell.GetSpellDescription) or GetSpellDescription
+	if not getDesc then return nil end
+	local ok, d = pcall(getDesc, id)
+	if not ok or type(d) ~= "string" or (issecretvalue and issecretvalue(d)) then return nil end
+	if d == "" then return nil end -- Zauberdaten noch nicht geladen: später erneut
+	d = d:gsub("(%d)[%.,](%d%d%d)", "%1%2") -- Tausenderpunkte entfernen
+	local lo, hi = d:match("(%d+)%s*bis%s*(%d+)")
+	if not lo then lo, hi = d:match("(%d+)%s*to%s*(%d+)") end
+	local val
+	if lo then
+		val = (tonumber(lo) + tonumber(hi)) / 2
+	else
+		-- HoTs: "um 45 im Verlauf von 15 Sek." -> größte Zahl, die keine Zeitangabe ist
+		for num, unit in d:gmatch("(%d+)%s*(%a*)") do
+			local u = unit:lower()
+			if not (u:find("^sek") or u:find("^sec") or u:find("^min")) then
+				local n = tonumber(num)
+				if n and (not val or n > val) then val = n end
+			end
+		end
+	end
+	descCache[id] = val or false
+	return val
+end
+
+local function HealAmount(id)
+	local base = SpellBaseHeal(id)
+	if not base then return nil end
+	local bonus = 0
+	if GetSpellBonusHealing then
+		local ok, b = pcall(GetSpellBonusHealing)
+		if ok and SafeGreater(b, 0) then
+			local castMs = 1500
+			if C_Spell and C_Spell.GetSpellInfo then
+				local info = C_Spell.GetSpellInfo(id)
+				if info and SafeGreater(info.castTime, 0) then castMs = info.castTime end
+			end
+			bonus = b * math.min(castMs / 1000, 3.5) / 3.5
+		end
+	end
+	return math.floor(base + bonus + 0.5)
+end
+
+------------------------------------------------------------------------
+-- HoTs: verbleibende Heilung laufender HoTs auf dem Ziel.
+-- UnitGetIncomingHeals kennt keine HoTs. Wir lesen die HoT-Buffs (Restzeit)
+-- und schätzen die Gesamtheilung aus dem Zaubertext des Rangs. Im Kampf sind
+-- die Buffs fremder Ziele secret -> letzter Stand wird weitergerechnet;
+-- eigene HoTs, die im Kampf gewirkt werden, kommen über dein Wirken dazu.
+------------------------------------------------------------------------
+local HOT_BASE = { 774, 8936, 139 } -- Verjüngung, Nachwachsen, Erneuerung
+local hotNames
+local function IsHot(name)
+	if not name then return false end
+	if not hotNames then
+		local t, n = {}, 0
+		for _, id in ipairs(HOT_BASE) do
+			local nm = SpellInfo(id)
+			if nm then t[nm] = true; n = n + 1 end
+		end
+		if n == 0 then return false end
+		hotNames = t
+	end
+	return hotNames[name] == true
+end
+
+local function IsTimeUnit(unit)
+	local u = unit:lower()
+	return u:find("^sek") or u:find("^sec") or u:find("^min")
+end
+
+-- Gesamtheilung und Dauer (Sek.) des HoT-Anteils aus dem Zaubertext.
+-- Direktheilung ("93 bis 107", z. B. bei Nachwachsen) wird vorher entfernt.
+local hotDescCache = {}
+local function HotInfo(id)
+	local c = hotDescCache[id]
+	if c ~= nil then
+		if c then return c[1], c[2] end
+		return nil
+	end
+	local getDesc = (C_Spell and C_Spell.GetSpellDescription) or GetSpellDescription
+	if not getDesc or not id then return nil end
+	local ok, d = pcall(getDesc, id)
+	if not ok or type(d) ~= "string" or (issecretvalue and issecretvalue(d)) or d == "" then return nil end
+	d = d:gsub("(%d)[%.,](%d%d%d)", "%1%2")
+	local dur
+	for num, unit in d:gmatch("(%d+)%s*(%a*)") do
+		local u = unit:lower()
+		if u:find("^sek") or u:find("^sec") then dur = tonumber(num) end
+	end
+	local rest = d:gsub("%d+%s*bis%s*%d+", ""):gsub("%d+%s*to%s*%d+", "")
+	local total
+	for num, unit in rest:gmatch("(%d+)%s*(%a*)") do
+		if not IsTimeUnit(unit) then
+			local n = tonumber(num)
+			if n and (not total or n > total) then total = n end
+		end
+	end
+	if total and dur and dur > 0 then
+		hotDescCache[id] = { total, dur }
+		return total, dur
+	end
+	hotDescCache[id] = false
+	return nil
+end
+
+-- Heilungsbonus für eigene HoTs (Classic-Faustregel: Dauer / 15 Sek.)
+local function OwnHotBonus(dur)
+	if not GetSpellBonusHealing then return 0 end
+	local ok, b = pcall(GetSpellBonusHealing)
+	if ok and SafeGreater(b, 0) then return b * math.min(dur, 15) / 15 end
+	return 0
+end
+
+local hots = {} -- { name, expires, duration, total, own } des aktuellen Ziels
+
+local function ReadHots()
+	local list = {}
+	for i = 1, 40 do
+		local a = C_UnitAuras.GetAuraDataByIndex("target", i, "HELPFUL")
+		if not a then break end
+		if IsHot(a.name) and SafeGreater(a.expirationTime, 0) then
+			local total, ddur = HotInfo(a.spellId)
+			if total then
+				local dur = SafeGreater(a.duration, 0) and a.duration or ddur
+				local own = a.sourceUnit ~= nil and UnitIsUnit(a.sourceUnit, "player")
+				if own then total = total + OwnHotBonus(dur) end
+				list[#list + 1] = { name = a.name, expires = a.expirationTime, duration = dur, total = total, own = own }
+			end
+		end
+	end
+	return list
+end
+
+local function RefreshHots()
+	if not UnitExists("target") then hots = {}; return end
+	if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return end
+	local ok, list = pcall(ReadHots)
+	if ok and list then hots = list end -- secret (Kampf): alten Stand behalten
+end
+
+-- Eigener HoT auf das aktuelle Ziel gewirkt (funktioniert auch im Kampf)
+local function AddOwnHot(spellID)
+	local name = SpellInfo(spellID or 0)
+	if not IsHot(name) then return end
+	local total, dur = HotInfo(spellID)
+	if not total then return end
+	for i = #hots, 1, -1 do
+		if hots[i].own and hots[i].name == name then table.remove(hots, i) end
+	end
+	hots[#hots + 1] = { name = name, expires = GetTime() + dur, duration = dur,
+		total = total + OwnHotBonus(dur), own = true }
+end
+
+local function HotRemaining()
+	local now, sum = GetTime(), 0
+	for i = #hots, 1, -1 do
+		local h = hots[i]
+		local left = h.expires - now
+		if left <= 0 then
+			table.remove(hots, i)
+		else
+			sum = sum + h.total * math.min(1, left / h.duration)
+		end
+	end
+	return math.floor(sum + 0.5)
+end
+
+UpdatePrediction = function()
+	if not UnitExists("target") then
+		incBar:Hide(); hotBar:Hide(); previewBar:Hide()
+		hots = {}
+		return
+	end
+	local okMax, maxHP = pcall(UnitHealthMax, "target")
+	if not okMax or not maxHP then incBar:Hide(); hotBar:Hide(); previewBar:Hide(); return end
+
+	-- eingehende Heilung (secret-Werte gehen direkt an den Balken)
+	local inc = 0
+	if UnitGetIncomingHeals then
+		local ok, v = pcall(UnitGetIncomingHeals, "target")
+		if ok then
+			if issecretvalue and issecretvalue(v) then inc = v -- secret: nur an den Balken
+			elseif v then inc = v end
+		end
+	end
+	pcall(function()
+		incBar:SetMinMaxValues(0, maxHP)
+		incBar:SetValue(inc)
+	end)
+	incBar:Show()
+
+	-- laufende HoTs (Wert 0 = unsichtbar, Vorschau hängt trotzdem korrekt dahinter)
+	RefreshHots()
+	local hot = HotRemaining()
+	pcall(function()
+		hotBar:SetMinMaxValues(0, maxHP)
+		hotBar:SetValue(hot)
+	end)
+	hotBar:Show()
+
+	local amount = previewSpellID and HealAmount(previewSpellID)
+	if amount then
+		pcall(function()
+			previewBar:SetMinMaxValues(0, maxHP)
+			previewBar:SetValue(amount)
+		end)
+		previewBar:Show()
+	else
+		previewBar:Hide()
+	end
+end
+
 local function UpdateHealth()
 	if not UnitExists("target") then
 		hp:SetMinMaxValues(0, 1)
@@ -757,6 +1034,19 @@ local function UpdateHealth()
 	end)
 	HealthColor()
 	title.right:SetText(HealthPercentText())
+	UpdatePrediction()
+end
+
+for i = 1, MAX_HEALS do
+	heal[i].tooltipAnchor = "ANCHOR_BOTTOM" -- Tooltip nach unten, damit die Heil-Vorschau sichtbar bleibt
+	heal[i]:HookScript("OnEnter", function(self)
+		previewSpellID = self.spellID
+		UpdatePrediction()
+	end)
+	heal[i]:HookScript("OnLeave", function()
+		previewSpellID = nil
+		UpdatePrediction()
+	end)
 end
 
 -- Nicht-geschützte Optik: darf auch im Kampf laufen
@@ -927,6 +1217,7 @@ frame:SetScript("OnUpdate", function(_, elapsed)
 	if acc < 0.2 then return end
 	acc = 0
 	if best.timer:IsShown() or best.icon:IsDesaturated() then UpdateBestState() end
+	if #hots > 0 then UpdatePrediction() end
 	local hasTarget = UnitExists("target")
 	for _, b in ipairs(allButtons) do
 		if b:IsShown() and b.spellName then
@@ -935,11 +1226,18 @@ frame:SetScript("OnUpdate", function(_, elapsed)
 			else
 				b.icon:SetVertexColor(1, 1, 1)
 			end
-			local start, duration = Cooldown(b.spellName)
-			if duration and duration > 1.5 then -- globale Abklingzeit ignorieren
-				b.cd:SetCooldown(start, duration)
-			else
+			local start, duration, onGCD = Cooldown(b.spellName)
+			if onGCD then -- globale Abklingzeit ignorieren
 				b.cd:Clear()
+			else
+				local long = SafeGreater(duration, 1.5)
+				if long == true then
+					b.cd:SetCooldown(start, duration)
+				elseif long == false then
+					b.cd:Clear()
+				elseif not pcall(b.cd.SetCooldown, b.cd, start, duration) then
+					b.cd:Clear() -- secret und vom Widget nicht angenommen
+				end
 			end
 		end
 	end
@@ -955,7 +1253,7 @@ local function SafeRegister(event) pcall(ev.RegisterEvent, ev, event) end
 for _, e in ipairs({
 	"ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_TARGET_CHANGED", "PLAYER_REGEN_ENABLED",
 	"UNIT_AURA", "GROUP_ROSTER_UPDATE", "SPELLS_CHANGED", "UNIT_FLAGS",
-	"UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_HEALTH_FREQUENT",
+	"UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_HEALTH_FREQUENT", "UNIT_HEAL_PREDICTION",
 	"UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_FAILED",
 	"UNIT_SPELLCAST_FAILED_QUIET", "UI_ERROR_MESSAGE",
 }) do SafeRegister(e) end
@@ -975,6 +1273,11 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
 					tname = tname:match("^[^%s%-]+") or tname
 					myCasts[tname] = myCasts[tname] or {}
 					myCasts[tname][sname] = GetTime()
+					local okT, same = pcall(function() return UnitName("target") == tname end)
+					if okT and same then
+						AddOwnHot(arg3)
+						UpdatePrediction()
+					end
 				end
 			end
 		end
@@ -988,7 +1291,9 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
 	elseif event == "UI_ERROR_MESSAGE" then
 		Log("error: %s (%s)", S(arg2), S(arg1))
 		return
-	elseif event == "PLAYER_TARGET_CHANGED" and db and db.debug and UnitExists("target") then
+	end
+	if event == "PLAYER_TARGET_CHANGED" then auraCache = nil; hots = {} end
+	if event == "PLAYER_TARGET_CHANGED" and db and db.debug and UnitExists("target") then
 		local _, class = UnitClass("target")
 		Log("--- target %s class=%s level=%s player=%s friend=%s inGroup=%s myLevel=%s",
 			S(UnitName("target")), S(class), S(UnitLevel("target")), S(UnitIsPlayer("target")),
@@ -1011,7 +1316,11 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
 		BuildRankMap()
 	elseif event == "SPELLS_CHANGED" then
 		BuildRankMap()
-	elseif event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" or event == "UNIT_HEALTH_FREQUENT" then
+		wipe(descCache)
+		wipe(hotDescCache)
+		hotNames = nil
+	elseif event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" or event == "UNIT_HEALTH_FREQUENT"
+		or event == "UNIT_HEAL_PREDICTION" then
 		if arg1 == "target" then UpdateHealth() end
 		return
 	elseif event == "UNIT_AURA" or event == "UNIT_FLAGS" then
@@ -1086,6 +1395,51 @@ SlashCmdList.BLESSINGBUDDY = function(msg)
 				.. " rank=" .. v(GetSpellSubtext or function() return "?" end, HighestRank(id))
 				.. " petOK=" .. tostring(CFG.petOK and CFG.petOK[key] or false)
 				.. " button=" .. tostring(small[key]:IsShown()))
+		end
+	elseif msg == "healtest" then
+		-- Prüft, welche Daten der Client für eine Heil-Vorschau hergibt
+		local function sec(x)
+			if issecretvalue and issecretvalue(x) then return "|cffffa000secret|r" end
+			return tostring(x)
+		end
+		local function has(x) return x and "|cff40ff40ja|r" or "|cffff4040nein|r" end
+		-- Ausgabe in den Chat UND ins Log (auch ohne /bb log on)
+		local print = function(line)
+			_G.print(line)
+			if db then
+				db.log = db.log or {}
+				table.insert(db.log, date("%H:%M:%S") .. " healtest " .. tostring(line):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
+				while #db.log > LOG_MAX do table.remove(db.log, 1) end
+			end
+		end
+		print(PREFIX .. "healtest:")
+		print("  issecretvalue=" .. has(issecretvalue)
+			.. " UnitGetIncomingHeals=" .. has(UnitGetIncomingHeals)
+			.. " UnitGetDetailedHealPrediction=" .. has(UnitGetDetailedHealPrediction)
+			.. " CreateUnitHealPredictionCalculator=" .. has(CreateUnitHealPredictionCalculator))
+		print("  GetSpellDescription=" .. has(C_Spell and C_Spell.GetSpellDescription or GetSpellDescription)
+			.. " GetSpellBonusHealing=" .. has(GetSpellBonusHealing))
+		if UnitExists("target") then
+			local okH, h = pcall(UnitHealth, "target")
+			local okM, m = pcall(UnitHealthMax, "target")
+			print("  target: health=" .. (okH and sec(h) or "ERR") .. " max=" .. (okM and sec(m) or "ERR"))
+			if UnitGetIncomingHeals then
+				local ok, inc = pcall(UnitGetIncomingHeals, "target")
+				print("  incomingHeals=" .. (ok and sec(inc) or "ERR"))
+			end
+		end
+		if GetSpellBonusHealing then
+			local ok, b = pcall(GetSpellBonusHealing)
+			print("  bonusHealing=" .. (ok and sec(b) or "ERR"))
+		end
+		local getDesc = (C_Spell and C_Spell.GetSpellDescription) or GetSpellDescription
+		for i = 1, MAX_HEALS do
+			local b = heal[i]
+			if b.spellID then
+				local ok, d = pcall(getDesc or function() return nil end, b.spellID)
+				print("  " .. tostring(b.spellName) .. " (" .. b.spellID .. "): " .. (ok and sec(d) or "ERR"))
+				print("    -> geschätzt: " .. tostring(HealAmount(b.spellID)))
+			end
 		end
 	elseif msg == "reset" then
 		if db then db.pos = nil end

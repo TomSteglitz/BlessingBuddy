@@ -3,7 +3,7 @@
 ## Notes: One-click buffs and rescue heals for players and pets outside your group
 ## Notes-deDE: Buffs und Rettungs-Heilung per Klick für Spieler und Begleiter außerhalb deiner Gruppe
 ## Author: TomSteglitz
-## Version: @project-version@
+## Version: 1.5.00
 ## Category: Buffs & Debuffs
 ## Category-deDE: Buffs & Debuffs
 ## IconTexture: Interface\Icons\Spell_Magic_GreaterBlessingofKings

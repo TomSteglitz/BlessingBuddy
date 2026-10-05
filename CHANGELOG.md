@@ -1,6 +1,24 @@
 # BlessingBuddy Changelog
 
-## 1.2.7 (2026-10-03)
+## 1.5.00 (2026-10-04)
+- New: running HoTs on the target (Rejuvenation, Regrowth, Renew – yours and others') show their remaining healing as a teal section on the health bar, right after incoming heals
+  - In combat the client protects the target's buffs: the last known HoTs keep counting down, and HoTs you cast yourself are added from your own casts
+
+## 1.4.01 (2026-10-04)
+- Fixed: the tooltip of heal buttons covered the health bar and its heal preview – it now opens below the button
+
+## 1.4.00 (2026-10-04)
+- New: heal prediction on the health bar – incoming heals (yours and others', while being cast) show as a dark green extension; anything beyond 100 % is cut off, so overhealing is visible at a glance
+- New: hover a heal button to preview how far it would fill the health bar (light green, estimated from the spell text plus your bonus healing)
+- New: `/bb healtest` shows which heal-prediction data the client provides and also writes it to the debug log
+
+## 1.3.02 (2026-10-04)
+- Fixed: Lua error "Auras cannot be accessed when secret" in combat – while the client protects the target's buffs, the last known state is kept
+
+## 1.3.01 (2026-10-04)
+- Fixed: Lua error "attempt to compare local 'duration' (a secret number value)" during the global cooldown – cooldown and buff timers are now read safely when the client protects them
+
+## 1.3.00 (2026-10-03)
 - Paladin: removed Blessing of Protection from the rescue row – it can only be cast on party/raid members
 - Fixed: Greater Blessings and group buffs (Gift of the Wild, Prayer of Fortitude, Arcane Brilliance, …) now count as the matching single buff – the recommendation moves on instead of suggesting a buff that wouldn't stack
 - Fixed: buffs now respect the target-level limit – the highest rank that works on the target is cast, and buffs with no usable rank are hidden (e.g. Kings on targets below level 10)
