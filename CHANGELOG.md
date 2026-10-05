@@ -1,5 +1,8 @@
 # BlessingBuddy Changelog
 
+## 1.5.01 (2026-10-05)
+- Classic Era removed from the supported game versions for now – it is untested; BlessingBuddy targets WoW: Forever
+
 ## 1.5.00 (2026-10-04)
 - New: running HoTs on the target (Rejuvenation, Regrowth, Renew – yours and others') show their remaining healing as a teal section on the health bar, right after incoming heals
   - In combat the client protects the target's buffs: the last known HoTs keep counting down, and HoTs you cast yourself are added from your own casts
