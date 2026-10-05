@@ -7,10 +7,10 @@ One-click buffs and rescue heals for players and pets **outside your group** in 
 Target a friendly stranger and BlessingBuddy shows a small bar with your single-target buffs, a recommended buff for the target's class, the target's health and a row of rescue heals.
 
 <p align="center">
-  <img src="media/screenshot-paladin-next-blessing.png" alt="Kings already active, Might recommended next">
-  <img src="media/screenshot-priest.png" alt="Priest bar">
-  <img src="media/screenshot-out-of-range.png" alt="Icons turn red when the target is out of range">
-  <img src="media/screenshot-pvp-warning.png" alt="Red PvP warning when helping the target would flag you">
+  <img src="media/gallery-1-recommended-buff.png" width="640" alt="Kings already active, Might recommended next">
+  <img src="media/gallery-2-out-of-range.png" width="640" alt="Icons turn red when the target is out of range">
+  <img src="media/gallery-3-every-class.png" width="640" alt="Works for every buffing class, here a level 2 priest">
+  <img src="media/gallery-4-pvp-warning.png" width="640" alt="Red PvP warning when helping the target would flag you">
 </p>
 
 ## Download
