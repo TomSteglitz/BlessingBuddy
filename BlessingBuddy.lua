@@ -375,43 +375,94 @@ end
 -- Forever: Im Kampf sind die Buff-Daten fremder Ziele "secret" – die API wirft
 -- dann einen Fehler. In dem Fall gilt der letzte lesbare Stand dieses Ziels
 -- (wird beim Zielwechsel verworfen). 4. Rückgabewert: false = Daten veraltet.
-local auraCache -- { all, mine, mineExp } des aktuellen Ziels
+-- Eigene Segen: Zeitpunkt des letzten Wirkens pro Ziel (Fallback, falls der
+-- Client die Restzeit fremder Spieler nicht liefert). Forever: 60 Minuten.
+local BUFF_DURATION = 3600
+
+local auraCache -- { all, mine, mineExp, mineApp } des aktuellen Ziels
+local Log, S -- unten definiert
 
 local function ReadTargetBuffs()
-	local all, mine, mineExp = {}, {}, {}
+	local all, mine, mineExp, mineApp = {}, {}, {}, {}
 	for i = 1, 40 do
-		local name, source, expires
+		local name, source, expires, dur
 		if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
 			local a = C_UnitAuras.GetAuraDataByIndex("target", i, "HELPFUL")
-			if a then name, source, expires = a.name, a.sourceUnit, a.expirationTime end
+			if a then name, source, expires, dur = a.name, a.sourceUnit, a.expirationTime, a.duration end
 		else
-			local n, _, _, _, _, e, s = UnitBuff("target", i)
-			name, source, expires = n, s, e
+			local n, _, _, _, d, e, s = UnitBuff("target", i)
+			name, source, expires, dur = n, s, e, d
 		end
 		if not name then break end
 		all[name] = true
 		if source and UnitIsUnit(source, "player") then
 			mine[name] = true
 			if SafeGreater(expires, 0) then mineExp[name] = expires end
+			-- Zeitpunkt des Auflegens (nil, wenn secret)
+			local okA, app = pcall(function()
+				if type(expires) == "number" and type(dur) == "number" and dur > 0 then return expires - dur end
+			end)
+			if okA and app then mineApp[name] = app end
 		end
 	end
-	return all, mine, mineExp
+	return all, mine, mineExp, mineApp
+end
+
+-- Forever: Ist das Ziel im Kampf, liefert der Client seine Buffs entweder gar
+-- nicht (Fehler) oder mit dem alten Stand von vor dem Kampf. Eigene, erfolgreich
+-- gewirkte Buffs werden deshalb hier gemerkt und über jedes Leseergebnis gelegt,
+-- bis die echten Daten sie bestätigen (oder das Ziel ohne sie außer Kampf ist).
+local pendingOwn = {} -- [Zielname][Buffname] = GetTime() des eigenen Casts
+
+local function ApplyPending(all, mine, mineExp, mineApp, fresh)
+	local tname = UnitName("target")
+	local p = tname and pendingOwn[tname]
+	if not p then return end
+	local okC, inCombat = pcall(function() return UnitAffectingCombat("target") and true or false end)
+	local calm = fresh and okC and inCombat == false
+	local now = GetTime()
+	for s, t in pairs(p) do
+		local app = mineApp and mineApp[s]
+		if fresh and mine[s] and app and app >= t - 2 then
+			p[s] = nil -- echte Daten zeigen den neuen Buff
+			Log("pending %s on %s: confirmed", S(s), S(tname))
+		elseif (calm and now - t > 3) or now - t > BUFF_DURATION then
+			p[s] = nil -- Ziel außer Kampf, Daten wieder echt
+			Log("pending %s on %s: dropped (calm=%s)", S(s), S(tname), S(calm))
+		else
+			all[s] = true
+			mine[s] = true
+			mineExp[s] = nil -- Restzeit aus myCasts
+		end
+	end
+	if next(p) == nil then pendingOwn[tname] = nil end
 end
 
 local function TargetBuffs()
 	if not UnitExists("target") then return {}, {}, {}, true end
-	local ok, all, mine, mineExp = pcall(ReadTargetBuffs)
+	local ok, all, mine, mineExp, mineApp = pcall(ReadTargetBuffs)
+	local fresh = ok
 	if ok then
-		auraCache = { all, mine, mineExp }
-		return all, mine, mineExp, true
+		auraCache = { all, mine, mineExp, mineApp }
+	elseif auraCache then
+		all, mine, mineExp, mineApp = auraCache[1], auraCache[2], auraCache[3], auraCache[4]
+	else
+		auraCache = { {}, {}, {}, {} }
+		all, mine, mineExp, mineApp = auraCache[1], auraCache[2], auraCache[3], auraCache[4]
 	end
-	if auraCache then return auraCache[1], auraCache[2], auraCache[3], false end
-	return {}, {}, {}, false
+	pcall(function() -- Diagnose: Lesestatus nur bei Änderung loggen
+		if not pendingOwn[UnitName("target")] then return end
+		local okC, inCombat = pcall(UnitAffectingCombat, "target")
+		local state = S(fresh) .. "/" .. (okC and S(inCombat) or "secret")
+		if state ~= auraCache.logState then
+			auraCache.logState = state
+			Log("pending read: fresh/targetCombat=%s", state)
+		end
+	end)
+	pcall(ApplyPending, all, mine, mineExp, mineApp, fresh)
+	return all, mine, mineExp, fresh
 end
 
--- Eigene Segen: Zeitpunkt des letzten Wirkens pro Ziel (Fallback, falls der
--- Client die Restzeit fremder Spieler nicht liefert). Forever: 60 Minuten.
-local BUFF_DURATION = 3600
 local REFRESH_BELOW = 300 -- ab 5 Minuten Restzeit wird Auffrischen empfohlen
 local myCasts = {}        -- [Zielname][Zaubername] = GetTime()
 local pendingCasts = {}   -- [castGUID] = Zielname
@@ -437,6 +488,22 @@ local function HasKey(set, key)
 		if set[n] then return true end
 	end
 	return false
+end
+
+-- Eigenen, erfolgreich gewirkten Buff für ApplyPending merken (nur Buffs aus
+-- der Buff-Liste, keine Heilzauber)
+local function RememberOwnBuff(tname, sname)
+	if not tname or not sname then return end
+	for _, key in ipairs(ORDER) do
+		for _, n in ipairs(NamesFor(key)) do
+			if n == sname then
+				pendingOwn[tname] = pendingOwn[tname] or {}
+				pendingOwn[tname][sname] = GetTime()
+				Log("pending %s on %s: noted", S(sname), S(tname))
+				return
+			end
+		end
+	end
 end
 
 -- Restzeit (Sekunden) deines eigenen Buffs dieses Schlüssels auf dem Ziel,
@@ -465,11 +532,11 @@ local db
 -- geschrieben bei /reload oder Ausloggen). Aktivieren mit /bb log on
 ------------------------------------------------------------------------
 local LOG_MAX = 400
-local function S(v)
+function S(v) -- local, vorab deklariert
 	local ok, str = pcall(tostring, v)
 	return ok and str or "<secret>"
 end
-local function Log(fmt, ...)
+function Log(fmt, ...) -- local, vorab deklariert (vor TargetBuffs)
 	if not (db and db.debug) then return end
 	db.log = db.log or {}
 	local ok, line = pcall(string.format, fmt, ...)
@@ -1273,9 +1340,11 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
 					tname = tname:match("^[^%s%-]+") or tname
 					myCasts[tname] = myCasts[tname] or {}
 					myCasts[tname][sname] = GetTime()
+					RememberOwnBuff(tname, sname)
 					local okT, same = pcall(function() return UnitName("target") == tname end)
 					if okT and same then
 						AddOwnHot(arg3)
+						UpdateVisuals()
 						UpdatePrediction()
 					end
 				end

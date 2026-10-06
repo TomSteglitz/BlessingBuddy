@@ -1,5 +1,8 @@
 # BlessingBuddy Changelog
 
+## 1.5.02 (2026-10-06)
+- Fixed: a buff cast on a target in combat was not shown as done until the target left combat – the client keeps reporting the old buffs while the target is in combat, so your own successful casts are now remembered and shown until the real buff data confirms them
+
 ## 1.5.01 (2026-10-05)
 - Classic Era removed from the supported game versions for now – it is untested; BlessingBuddy targets WoW: Forever
 
