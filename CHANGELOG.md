@@ -1,5 +1,8 @@
 # BlessingBuddy Changelog
 
+## 1.5.03 (2026-10-06)
+- Fixed: switching targets while you are in combat (e.g. from a hunter to their pet) kept showing buffs that don't fit the new target – the game doesn't allow changing the buttons in combat, so those buffs are now darkened and marked red until the bar is rebuilt after combat
+
 ## 1.5.02 (2026-10-06)
 - Fixed: a buff cast on a target in combat was not shown as done until the target left combat – the client keeps reporting the old buffs while the target is in combat, so your own successful casts are now remembered and shown until the real buff data confirms them
 

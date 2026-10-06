@@ -701,6 +701,18 @@ local function CreateSpellButton(name, size)
 	b.active:SetPoint("BOTTOMRIGHT", 2, -2)
 	b.active:Hide()
 
+	-- Markierung "passt nicht zum Ziel" (im Kampf darf die Leiste nicht
+	-- umgebaut werden): roter Rand + rote Überlagerung, Icon abgedunkelt
+	b.badBorder = b:CreateTexture(nil, "BACKGROUND")
+	b.badBorder:SetColorTexture(0.88, 0.16, 0.16, 1)
+	b.badBorder:SetPoint("TOPLEFT", -2, 2)
+	b.badBorder:SetPoint("BOTTOMRIGHT", 2, -2)
+	b.badBorder:Hide()
+	b.bad = b:CreateTexture(nil, "OVERLAY", nil, -1)
+	b.bad:SetAllPoints(b.icon)
+	b.bad:SetColorTexture(0.8, 0.08, 0.08, 0.42)
+	b.bad:Hide()
+
 	b:SetScript("OnEnter", function(self)
 		if not self.spellID then return end
 		GameTooltip:SetOwner(self, self.tooltipAnchor or "ANCHOR_TOP")
@@ -710,6 +722,25 @@ local function CreateSpellButton(name, size)
 	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	allButtons[#allButtons + 1] = b
 	return b
+end
+
+-- Passt der Buff dieses Schlüssels zum aktuellen Ziel? Wie UpdateSecure:
+-- Begleiter nehmen nur petOK-Buffs an, ohne passenden Rang kein Buff
+local function BadForTarget(key)
+	if not key or not UnitExists("target") then return false end
+	if not UnitIsPlayer("target") and not (CFG.petOK and CFG.petOK[key]) then return true end
+	return BuffRankFor(BLESSINGS[key], TargetLevel()) == nil
+end
+
+local function SetBad(b, bad)
+	if (b.badState or false) ~= (bad or false) then
+		Log("mark %s bad=%s combat=%s", S(b.spellName), S(bad), S(InCombatLockdown()))
+	end
+	b.badState = bad or nil
+	b.badBorder:SetShown(bad)
+	b.bad:SetShown(bad)
+	b.icon:SetDesaturated(bad)
+	if bad then b.icon:SetVertexColor(0.55, 0.55, 0.55) end
 end
 
 local best = CreateSpellButton("BlessingBuddyBestButton", BEST)
@@ -727,6 +758,10 @@ best.timer:Hide()
 
 -- Zustand des großen Buttons: normal / erledigt (ausgegraut) / auffrischen (gelb)
 local function UpdateBestState()
+	if best.badState then -- passt nicht zum Ziel: Markierung hat Vorrang
+		best.border:Hide(); best.timer:Hide()
+		return
+	end
 	if not best:IsShown() or not best.key then
 		best.icon:SetDesaturated(false); best.border:Hide(); best.timer:Hide()
 		return
@@ -1123,8 +1158,10 @@ local function UpdateVisuals()
 	for _, key in ipairs(ORDER) do
 		local b = small[key]
 		b.active:SetShown(b.spellName ~= nil and HasKey(all, key))
+		SetBad(b, b.spellName ~= nil and BadForTarget(key))
 	end
 	best.active:SetShown(best.spellName ~= nil and HasKey(all, best.key))
+	SetBad(best, best.spellName ~= nil and BadForTarget(best.key))
 	UpdateBestState()
 	for i = 1, MAX_HEALS do
 		local b = heal[i]
@@ -1288,7 +1325,9 @@ frame:SetScript("OnUpdate", function(_, elapsed)
 	local hasTarget = UnitExists("target")
 	for _, b in ipairs(allButtons) do
 		if b:IsShown() and b.spellName then
-			if hasTarget and InRange(b.spellName) == false then
+			if b.badState then
+				b.icon:SetVertexColor(0.55, 0.55, 0.55) -- Markierung "passt nicht"
+			elseif hasTarget and InRange(b.spellName) == false then
 				b.icon:SetVertexColor(1, 0.3, 0.3)
 			else
 				b.icon:SetVertexColor(1, 1, 1)
