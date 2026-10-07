@@ -1,5 +1,9 @@
 # BlessingBuddy Changelog
 
+## 1.5.04 (2026-10-07)
+- Fixed: in combat, clicking a friendly player showed no buffs if your previous target was an enemy or an NPC – the bar was laid out for that target and can't be changed in combat; it now keeps the full set of buffs whenever the target isn't a friendly player or pet
+- Buff buttons whose rank is too high for the target's level are now also marked red in combat
+
 ## 1.5.03 (2026-10-06)
 - Fixed: switching targets while you are in combat (e.g. from a hunter to their pet) kept showing buffs that don't fit the new target – the game doesn't allow changing the buttons in combat, so those buffs are now darkened and marked red until the bar is rebuilt after combat
 

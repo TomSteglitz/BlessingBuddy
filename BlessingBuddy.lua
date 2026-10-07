@@ -725,11 +725,23 @@ local function CreateSpellButton(name, size)
 end
 
 -- Passt der Buff dieses Schlüssels zum aktuellen Ziel? Wie UpdateSecure:
--- Begleiter nehmen nur petOK-Buffs an, ohne passenden Rang kein Buff
-local function BadForTarget(key)
+-- Begleiter nehmen nur petOK-Buffs an, ohne passenden Rang kein Buff.
+-- spellID = der auf dem Button liegende Rang: ist er für das Ziel zu hoch
+-- (Lernstufe > Zielstufe + 10), schlägt der Zauber fehl -> ebenfalls markieren
+local function BadForTarget(key, spellID)
 	if not key or not UnitExists("target") then return false end
 	if not UnitIsPlayer("target") and not (CFG.petOK and CFG.petOK[key]) then return true end
-	return BuffRankFor(BLESSINGS[key], TargetLevel()) == nil
+	local tLevel = TargetLevel()
+	if BuffRankFor(BLESSINGS[key], tLevel) == nil then return true end
+	if spellID and tLevel then
+		local fallback
+		for _, r in ipairs(BUFF_RANKS[BLESSINGS[key]] or {}) do
+			if r[1] == spellID then fallback = r[2] end
+		end
+		local need = LearnLevel(spellID, fallback)
+		if need and need > tLevel + 10 then return true end
+	end
+	return false
 end
 
 local function SetBad(b, bad)
@@ -1158,10 +1170,10 @@ local function UpdateVisuals()
 	for _, key in ipairs(ORDER) do
 		local b = small[key]
 		b.active:SetShown(b.spellName ~= nil and HasKey(all, key))
-		SetBad(b, b.spellName ~= nil and BadForTarget(key))
+		SetBad(b, b.spellName ~= nil and BadForTarget(key, b.spellID))
 	end
 	best.active:SetShown(best.spellName ~= nil and HasKey(all, best.key))
-	SetBad(best, best.spellName ~= nil and BadForTarget(best.key))
+	SetBad(best, best.spellName ~= nil and BadForTarget(best.key, best.spellID))
 	UpdateBestState()
 	for i = 1, MAX_HEALS do
 		local b = heal[i]
@@ -1201,8 +1213,15 @@ local function UpdateSecure()
 	end
 	pendingSecure = false
 
+	-- Nur echte Buff-Ziele (befreundete Spieler oder Begleiter) bestimmen die
+	-- Belegung. Gegner, NPCs oder du selbst: neutrale Belegung wie ohne Ziel
+	-- (alle gelernten Buffs, höchster Rang), denn im Kampf kann die Leiste
+	-- nicht mehr umgebaut werden und muss dann für jeden Spieler passen.
+	local buffTarget = UnitExists("target") and UnitIsFriend("player", "target")
+		and not UnitIsUnit("target", "player")
+		and (UnitIsPlayer("target") or IsOtherPet("target"))
 	local all, mine = TargetBuffs()
-	local bestKey = PickBest(all, mine)
+	local bestKey = buffTarget and PickBest(all, mine) or nil
 
 	-- Reihe 1: Empfehlung + Buffs
 	local x0 = bestKey and (PAD + BEST + GAP) or PAD
@@ -1210,8 +1229,8 @@ local function UpdateSecure()
 	local ySmall = -TITLE_H - (row1H - SMALL) / 2
 	local nBuff = 0
 	-- Begleiter: die meisten Buffs wirken in Forever nicht -> nur petOK-Buffs zeigen
-	local petTarget = UnitExists("target") and not UnitIsPlayer("target")
-	local tLevel = TargetLevel()
+	local petTarget = buffTarget and not UnitIsPlayer("target")
+	local tLevel = buffTarget and TargetLevel() or nil
 	for _, key in ipairs(ORDER) do
 		local b = small[key]
 		local allowed = not petTarget or (CFG.petOK and CFG.petOK[key])
