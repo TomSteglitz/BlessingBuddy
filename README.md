@@ -28,6 +28,7 @@ Target a friendly stranger and BlessingBuddy shows a small bar with your single-
 - Pets of other players: health bar, heals, Thorns
 - Works in combat, keybinds, range/cooldown display, PvP warning
 - Always casts your highest learned rank
+- Optional visibility for players outside your group, party members, raid members, and yourself (Interface > AddOns > BlessingBuddy; defaults keep the classic “strangers only” behavior outside combat; self off by default)
 - English and German interface
 
 Supported classes: Paladin, Druid, Priest, Mage, Warlock, Shaman.
@@ -40,6 +41,7 @@ Supported classes: Paladin, Druid, Priest, Mage, Warlock, Shaman.
 | `/bb debug` | diagnostic info about your target |
 | `/bb log on\|off\|clear` | write a detailed debug log to the SavedVariables file |
 | `/bb healtest` | show which heal-prediction data the client provides |
+| *(settings)* | Interface > AddOns > BlessingBuddy — who to show the bar for outside combat |
 
 German aliases: `/segen move`, `/segen reset`, `/segen debug`.
 

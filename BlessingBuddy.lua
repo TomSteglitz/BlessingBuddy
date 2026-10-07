@@ -4,7 +4,7 @@
 --   Reihe 1: großer "Empfohlen"-Button + deine Buffs
 --   Lebensbalken des Ziels
 --   Reihe 2: Heil-/Rettungszauber
--- Außerhalb des Kampfes nur für Spieler, die nicht in deiner Gruppe sind.
+-- Außerhalb des Kampfes: Sichtbarkeit nach Einstellung (Fremde/Gruppe/Raid).
 -- Im Kampf für jeden befreundeten Spieler (Rettung geht vor).
 
 local ADDON = ...
@@ -182,6 +182,12 @@ local L = {
 	BIND_HEAL = "Heal slot %d on target",
 	PVP       = "PvP",
 	PET       = "Pet",
+	OPT_SHOW_OUTSIDE = "Show for players outside group",
+	OPT_SHOW_PARTY   = "Show for party members",
+	OPT_SHOW_RAID    = "Show for raid members",
+	OPT_SHOW_SELF    = "Show for yourself",
+	OPT_INTRO        = "Controls when BlessingBuddy appears on friendly targets outside of combat.",
+	HELP_OPTS        = "  Options: Interface > AddOns > BlessingBuddy",
 }
 if GetLocale() == "deDE" then
 	L.DRAG      = "(Shift+Ziehen)"
@@ -196,6 +202,12 @@ if GetLocale() == "deDE" then
 	L.BIND_BEST = "Empfohlenen Buff auf Ziel wirken"
 	L.BIND_HEAL = "Heil-Slot %d auf Ziel wirken"
 	L.PET       = "Begleiter"
+	L.OPT_SHOW_OUTSIDE = "Für Spieler außerhalb der Gruppe anzeigen"
+	L.OPT_SHOW_PARTY   = "Für Gruppenmitglieder anzeigen"
+	L.OPT_SHOW_RAID    = "Für Schlachtzugmitglieder anzeigen"
+	L.OPT_SHOW_SELF    = "Für dich selbst anzeigen"
+	L.OPT_INTRO        = "Legt fest, wann BlessingBuddy außerhalb des Kampfes bei befreundeten Zielen erscheint."
+	L.HELP_OPTS        = "  Optionen: Optionen > AddOns > BlessingBuddy"
 end
 local PREFIX = "|cff66ccffBlessingBuddy|r: "
 
@@ -526,6 +538,15 @@ end
 -- Zustand
 ------------------------------------------------------------------------
 local db
+local SyncOptionsPanel
+
+local function EnsureDefaults()
+	if not db then return end
+	if db.showOutsideGroup == nil then db.showOutsideGroup = true end
+	if db.showPartyMembers == nil then db.showPartyMembers = false end
+	if db.showRaidMembers == nil then db.showRaidMembers = false end
+	if db.showSelf == nil then db.showSelf = false end
+end
 
 ------------------------------------------------------------------------
 -- Debug-Log (landet in WTF\Account\<KONTO>\SavedVariables\BlessingBuddy.lua,
@@ -817,26 +838,74 @@ local function IsOtherPet(unit)
 		and not UnitIsUnit(unit, "pet")
 end
 
+local function UnitInPlayerRaid(unit)
+	if UnitPlayerOrPetInRaid then return UnitPlayerOrPetInRaid(unit) end
+	return UnitInRaid(unit)
+end
+
+local function UnitInPlayerParty(unit)
+	if UnitPlayerOrPetInParty then return UnitPlayerOrPetInParty(unit) end
+	return UnitInParty(unit)
+end
+
 local function InMyGroup(unit)
-	if UnitPlayerOrPetInParty then
-		return UnitPlayerOrPetInParty(unit) or UnitPlayerOrPetInRaid(unit)
+	return UnitInPlayerParty(unit) or UnitInPlayerRaid(unit)
+end
+
+local function GetTargetVisibilityCategory(unit)
+	if UnitIsUnit(unit, "player") then
+		return "self"
 	end
-	return UnitInParty(unit) or UnitInRaid(unit)
+	if UnitInRaid and UnitInRaid("player") and UnitInPlayerRaid(unit) then
+		return "raid"
+	end
+	if UnitInPlayerParty(unit) then
+		return "party"
+	end
+	return "outside"
+end
+
+local function VisibilityAllowedForCategory(cat)
+	if not db then return false end
+	EnsureDefaults()
+	if cat == "outside" then return db.showOutsideGroup end
+	if cat == "party" then return db.showPartyMembers end
+	if cat == "raid" then return db.showRaidMembers end
+	if cat == "self" then return db.showSelf end
+	return false
+end
+
+local function TargetIsSelf()
+	return UnitExists("target") and UnitIsUnit("target", "player")
+end
+
+-- Forever/Classic: UnitIsFriend("player", "target") is often nil when target is you.
+local function IsVisibilityTarget()
+	if not UnitExists("target") or UnitIsDeadOrGhost("target") then return false end
+	if TargetIsSelf() then return true end
+	return (UnitIsPlayer("target") or IsOtherPet("target")) and UnitIsFriend("player", "target")
+end
+
+local function IsBuffLayoutTarget()
+	if not UnitExists("target") or UnitIsDeadOrGhost("target") then return false end
+	if TargetIsSelf() then
+		EnsureDefaults()
+		return db.showSelf
+	end
+	return UnitIsFriend("player", "target")
+		and (UnitIsPlayer("target") or IsOtherPet("target"))
 end
 
 local function ShouldShow()
 	if forceShow then return true end
-	return UnitExists("target")
-		and (UnitIsPlayer("target") or IsOtherPet("target"))
-		and UnitIsFriend("player", "target")
-		and not UnitIsUnit("target", "player")
-		and not UnitIsDeadOrGhost("target")
-		and not InMyGroup("target")
+	return IsVisibilityTarget()
+		and VisibilityAllowedForCategory(GetTargetVisibilityCategory("target"))
 end
 
 -- Sichtbarkeit über einen sicheren State-Driver, damit die Leiste auch im
--- Kampf beim Anklicken erscheint. Im Kampf: jeder befreundete, lebende Spieler.
--- Außerhalb: das Ergebnis von ShouldShow() (nur Fremde).
+-- Kampf beim Anklicken erscheint. Im Kampf: jeder befreundete, lebende Spieler
+-- (die drei Sichtbarkeits-Optionen gelten nur außerhalb des Kampfes).
+-- Außerhalb: das Ergebnis von ShouldShow().
 local function SetVisible(show)
 	RegisterStateDriver(frame, "visibility",
 		"[combat,@target,help,nodead] show; [combat] hide; " .. (show and "show" or "hide"))
@@ -1214,12 +1283,10 @@ local function UpdateSecure()
 	pendingSecure = false
 
 	-- Nur echte Buff-Ziele (befreundete Spieler oder Begleiter) bestimmen die
-	-- Belegung. Gegner, NPCs oder du selbst: neutrale Belegung wie ohne Ziel
-	-- (alle gelernten Buffs, höchster Rang), denn im Kampf kann die Leiste
-	-- nicht mehr umgebaut werden und muss dann für jeden Spieler passen.
-	local buffTarget = UnitExists("target") and UnitIsFriend("player", "target")
-		and not UnitIsUnit("target", "player")
-		and (UnitIsPlayer("target") or IsOtherPet("target"))
+	-- Belegung. Gegner, NPCs oder du selbst (ohne Option): neutrale Belegung
+	-- wie ohne Ziel (alle gelernten Buffs, höchster Rang), denn im Kampf kann
+	-- die Leiste nicht mehr umgebaut werden und muss dann für jeden Spieler passen.
+	local buffTarget = IsBuffLayoutTarget()
 	local all, mine = TargetBuffs()
 	local bestKey = buffTarget and PickBest(all, mine) or nil
 
@@ -1422,16 +1489,19 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
 	if event == "PLAYER_TARGET_CHANGED" then auraCache = nil; hots = {} end
 	if event == "PLAYER_TARGET_CHANGED" and db and db.debug and UnitExists("target") then
 		local _, class = UnitClass("target")
-		Log("--- target %s class=%s level=%s player=%s friend=%s inGroup=%s myLevel=%s",
+		Log("--- target %s class=%s level=%s player=%s friend=%s inGroup=%s category=%s myLevel=%s",
 			S(UnitName("target")), S(class), S(UnitLevel("target")), S(UnitIsPlayer("target")),
-			S(UnitIsFriend("player", "target")), S(InMyGroup("target")), S(UnitLevel("player")))
+			S(UnitIsFriend("player", "target")), S(InMyGroup("target")),
+			S(GetTargetVisibilityCategory("target")), S(UnitLevel("player")))
 		LogRawAuras()
 	end
 	if event == "ADDON_LOADED" then
 		if arg1 == ADDON then
 			BlessingBuddyDB = BlessingBuddyDB or {}
 			db = BlessingBuddyDB
+			EnsureDefaults()
 			RestorePosition()
+			SyncOptionsPanel()
 		end
 		return
 	elseif event == "PLAYER_LOGIN" then
@@ -1439,8 +1509,10 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
 			BlessingBuddyDB = BlessingBuddyDB or {}
 			db = BlessingBuddyDB
 		end
+		EnsureDefaults()
 		RestorePosition()
 		BuildRankMap()
+		SyncOptionsPanel()
 	elseif event == "SPELLS_CHANGED" then
 		BuildRankMap()
 		wipe(descCache)
@@ -1505,13 +1577,22 @@ SlashCmdList.BLESSINGBUDDY = function(msg)
 		table.sort(names)
 		print("  buffs (*=yours): " .. (#names > 0 and table.concat(names, ", ") or "-"))
 		print("  exists=" .. v(UnitExists, "target")
+			.. " selfTarget=" .. v(TargetIsSelf)
 			.. " player=" .. v(UnitIsPlayer, "target")
 			.. " controlled=" .. v(UnitPlayerControlled, "target")
 			.. " ownPet=" .. v(UnitIsUnit, "target", "pet"))
 		print("  friend=" .. v(UnitIsFriend, "player", "target")
 			.. " dead=" .. v(UnitIsDeadOrGhost, "target")
 			.. " inGroup=" .. v(InMyGroup, "target")
+			.. " category=" .. (UnitExists("target") and GetTargetVisibilityCategory("target") or "-")
 			.. " creatureType=" .. v(UnitCreatureType, "target"))
+		if db then
+			EnsureDefaults()
+			print("  showOutside=" .. tostring(db.showOutsideGroup)
+				.. " showParty=" .. tostring(db.showPartyMembers)
+				.. " showRaid=" .. tostring(db.showRaidMembers)
+				.. " showSelf=" .. tostring(db.showSelf))
+		end
 		print("  shouldShow=" .. v(ShouldShow)
 			.. " frameShown=" .. tostring(frame:IsShown())
 			.. " best=" .. tostring(best.spellName))
@@ -1579,5 +1660,80 @@ SlashCmdList.BLESSINGBUDDY = function(msg)
 		print(L.HELP_MOVE)
 		print(L.HELP_RST)
 		print(L.HELP_KEY)
+		if L.HELP_OPTS then print(L.HELP_OPTS) end
 	end
 end
+
+------------------------------------------------------------------------
+-- Interface-Optionen
+------------------------------------------------------------------------
+local optionsPanel
+
+local function OptionChecked(key, defaultWhenNil)
+	if not db then return defaultWhenNil end
+	EnsureDefaults()
+	local v = db[key]
+	if v == nil then return defaultWhenNil end
+	return v == true
+end
+
+local function SetCheckState(cb, checked)
+	if cb then cb:SetChecked(checked and true or false) end
+end
+
+SyncOptionsPanel = function()
+	if not optionsPanel or not db then return end
+	EnsureDefaults()
+	SetCheckState(optionsPanel.outside, OptionChecked("showOutsideGroup", true))
+	SetCheckState(optionsPanel.party, OptionChecked("showPartyMembers", false))
+	SetCheckState(optionsPanel.raid, OptionChecked("showRaidMembers", false))
+	SetCheckState(optionsPanel.self, OptionChecked("showSelf", false))
+end
+
+local function InitOptionsPanel()
+	if optionsPanel then return end
+	local panel = CreateFrame("Frame", "BlessingBuddyOptionsPanel")
+	panel.name = "BlessingBuddy"
+	optionsPanel = panel
+
+	local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+	title:SetPoint("TOPLEFT", 16, -16)
+	title:SetText("BlessingBuddy")
+
+	local intro = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	intro:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+	intro:SetPoint("RIGHT", -16, 0)
+	intro:SetJustifyH("LEFT")
+	intro:SetText(L.OPT_INTRO)
+
+	local function AddCheck(y, label, key)
+		local cb = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
+		cb:SetPoint("TOPLEFT", 16, y)
+		cb.Text:SetText(label)
+		cb:SetScript("OnClick", function(self)
+			if not db then return end
+			db[key] = self:GetChecked() == true
+			UpdateSecure()
+		end)
+		return cb
+	end
+
+	panel.outside = AddCheck(-72, L.OPT_SHOW_OUTSIDE, "showOutsideGroup")
+	panel.party = AddCheck(-100, L.OPT_SHOW_PARTY, "showPartyMembers")
+	panel.raid = AddCheck(-128, L.OPT_SHOW_RAID, "showRaidMembers")
+	panel.self = AddCheck(-156, L.OPT_SHOW_SELF, "showSelf")
+
+	panel:SetScript("OnShow", SyncOptionsPanel)
+	-- Interface Options (legacy) and Settings > AddOns call refresh when the panel is shown.
+	panel.refresh = SyncOptionsPanel
+	panel.OnRefresh = SyncOptionsPanel
+
+	if Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory then
+		local category = Settings.RegisterCanvasLayoutCategory(panel, ADDON)
+		Settings.RegisterAddOnCategory(category)
+	elseif InterfaceOptions_AddCategory then
+		InterfaceOptions_AddCategory(panel)
+	end
+end
+
+InitOptionsPanel()

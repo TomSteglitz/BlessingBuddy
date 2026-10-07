@@ -1,5 +1,15 @@
 # BlessingBuddy Changelog
 
+## 1.6.01 (2026-10-07)
+- New: optional "Show for yourself" visibility toggle (default off); same out-of-combat rules as the other visibility options
+- Fixed: self-target did not work because the client does not report you as a "friendly" target to yourself
+- Fixed: visibility options panel could show "outside group" unchecked while the default (on) behavior still applied until refresh/OnRefresh ran
+
+## 1.6.00 (2026-10-07)
+- New: optional visibility for party and raid members (Interface > AddOns > BlessingBuddy). Defaults unchanged: strangers only outside combat; party and raid off until you enable them
+- English and German option labels; `/bb` help lists where to find the settings
+- Note: the three toggles apply outside combat only; in combat the bar still appears for any friendly living target (secure frame limitation)
+
 ## 1.5.04 (2026-10-07)
 - Fixed: in combat, clicking a friendly player showed no buffs if your previous target was an enemy or an NPC – the bar was laid out for that target and can't be changed in combat; it now keeps the full set of buffs whenever the target isn't a friendly player or pet
 - Buff buttons whose rank is too high for the target's level are now also marked red in combat

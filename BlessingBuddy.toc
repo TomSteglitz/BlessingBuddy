@@ -1,9 +1,9 @@
 ## Interface: 16001
 ## Title: BlessingBuddy
-## Notes: One-click buffs and rescue heals for players and pets outside your group
-## Notes-deDE: Buffs und Rettungs-Heilung per Klick für Spieler und Begleiter außerhalb deiner Gruppe
+## Notes: One-click buffs and rescue heals; optional display for party and raid members (Interface > AddOns)
+## Notes-deDE: Buffs und Rettungs-Heilung per Klick; optional auch für Gruppen- und Schlachtzugmitglieder (Optionen > AddOns)
 ## Author: TomSteglitz
-## Version: 1.5.04
+## Version: 1.6.01
 ## Category: Buffs & Debuffs
 ## Category-deDE: Buffs & Debuffs
 ## IconTexture: Interface\Icons\Spell_Magic_GreaterBlessingofKings
